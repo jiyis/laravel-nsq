@@ -2,11 +2,17 @@
 
 namespace Jiyis\Nsq\Queue;
 
+use App\Jobs\AwardGenerate;
+use App\Jobs\AwardGenerateCheck;
+use App\Jobs\NsqTestJob;
 use Illuminate\Contracts\Queue\Queue as QueueContract;
 use Illuminate\Queue\Queue;
+use Jiyis\Nsq\Adapter\SwooleNsqClient;
+use Jiyis\Nsq\Message\Packet;
 use Jiyis\Nsq\Message\Unpack;
 use Jiyis\Nsq\Queue\Jobs\NsqJob;
 use Jiyis\Nsq\Queue\Manager\NsqManager;
+use Mockery\Exception;
 
 class NsqQueue extends Queue implements QueueContract
 {
@@ -15,18 +21,8 @@ class NsqQueue extends Queue implements QueueContract
      *
      */
     protected $nsq;
+    protected $consumerJob;
 
-    /**
-     * The connection name.
-     */
-    protected $connection;
-
-    /**
-     * The name of the default queue.
-     *
-     * @var string
-     */
-    protected $default;
 
     /**
      * The expiration time of a job.
@@ -38,15 +34,12 @@ class NsqQueue extends Queue implements QueueContract
     /**
      * NsqQueue constructor.
      * @param NsqManager $nsq
-     * @param string $default
-     * @param null $connection
      * @param int $retryAfter
      */
-    public function __construct(NsqManager $nsq, $default = 'nsq', $connection = null, $retryAfter = 60)
+    public function __construct(SwooleNsqClient $nsq, string $consumerJob, $retryAfter = 60)
     {
         $this->nsq = $nsq;
-        $this->default = $default;
-        $this->connection = $connection;
+        $this->consumerJob = $consumerJob;
         $this->retryAfter = $retryAfter;
     }
 
@@ -115,7 +108,8 @@ class NsqQueue extends Queue implements QueueContract
     public function pop($queue = null)
     {
         try {
-            $data = @$this->nsq->recv();
+
+            $data = @$this->nsq->getClient()->recv();
             if($data == false) return null;
             $frame = Unpack::getFrame($data);
 
@@ -127,7 +121,8 @@ class NsqQueue extends Queue implements QueueContract
                 return null;
             } elseif (Unpack::isMessage($frame)) {
 
-                return new NsqJob($this->container, $this, $frame, $this->connectionName);
+                $rawBody = $this->createNsqPayload($this->consumerJob, $frame);
+                return new NsqJob($this->container, $this, json_encode($rawBody), $queue, $this->connectionName);
             }  else {
 
             }
@@ -137,7 +132,8 @@ class NsqQueue extends Queue implements QueueContract
             $client->send(rdy(1));*/
 
         } catch (\Exception $exception) {
-            $this->reportConnectionError('pop', $exception);
+            throw new Exception($exception->getMessage());
+            //$this->reportConnectionError('pop', $exception);
         }
 
         return null;
@@ -147,9 +143,9 @@ class NsqQueue extends Queue implements QueueContract
      * Get the underlying Nsq instance.
      * @return NsqManager
      */
-    public function getNsq()
+    public function getClient()
     {
-        return $this->nsq;
+        return $this->nsq->getClient();
     }
 
     /**
@@ -163,13 +159,41 @@ class NsqQueue extends Queue implements QueueContract
     }
 
     /**
-     * @param string $job
+     * @param mixed $job
      * @param string $data
      * @param null $queue
      * @return string
      */
-    protected function createPayload($job, $data = '', $queue = null)
+    protected function createNsqPayload($job, $data = '', $queue = null)
     {
+        $job = resolve($job);
+        $message = $data['message'];
+        unset($data['message']);
+        return array_merge(
+            [
+                'displayName' => $this->getDisplayName($job),
+                'job' => 'Illuminate\Queue\CallQueuedHandler@call',
+                'maxTries' => isset($job->tries) ? $job->tries : null,
+                'timeout' => isset($job->timeout) ? $job->timeout : null,
+                'message' => $message,
+                'data' => [
+                    'commandName' => get_class($job),
+                    'command' => serialize(clone $job),
+                ],
+            ],
+            $data
+        );
+        return [
+            'displayName' => $this->getDisplayName($job),
+            'job' => 'Illuminate\Queue\CallQueuedHandler@call',
+            'maxTries' => isset($job->tries) ? $job->tries : null,
+            'timeout' => isset($job->timeout) ? $job->timeout : null,
+            'message' => $data['message'],
+            'data' => [
+                'commandName' => get_class($job),
+                'command' => serialize(clone $job),
+            ],
+        ];
         $payload = json_encode([
             'msg'                   => $data,
             'composite_http_header' => [
@@ -189,5 +213,6 @@ class NsqQueue extends Queue implements QueueContract
 
         return $payload;
     }
+
 
 }

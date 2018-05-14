@@ -7,8 +7,10 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Queue\Job as JobContract;
 use Illuminate\Queue\Jobs\Job;
 use Illuminate\Queue\Jobs\JobName;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Jiyis\Nsq\Queue\NsqQueue;
+use Jiyis\Nsq\Message\Packet;
 
 class NsqJob extends Job implements JobContract
 {
@@ -27,6 +29,14 @@ class NsqJob extends Job implements JobContract
      */
     protected $job;
 
+
+    /**
+     * The nsq top and channel name.
+     *
+     * @var string
+     */
+    protected $queue;
+
     /**
      * Same as NsqQueue, used for attempt counts.
      */
@@ -35,18 +45,22 @@ class NsqJob extends Job implements JobContract
     protected $connection;
     protected $consumer;
     protected $message;
+    protected $decoded;
 
 
     public function __construct(
         Container $container,
         NsqQueue $nsq,
         $job,
+        $queue,
         $connectionName
     ) {
         $this->container = $container;
         $this->job = $job;
         $this->nsq = $nsq;
+        $this->queue = $queue;
         $this->connectionName = $connectionName;
+        $this->decoded = $this->payload();
     }
 
     /**
@@ -60,7 +74,7 @@ class NsqJob extends Job implements JobContract
     {
         try {
             $payload = $this->payload();
-            var_dump($payload);die;
+
             list($class, $method) = JobName::parse($payload['job']);
 
             with($this->instance = $this->resolve($class))->{$method}($this, $payload['data']);
@@ -84,12 +98,9 @@ class NsqJob extends Job implements JobContract
      *
      * @return int
      */
-    public function attempts(): int
+    public function attempts()
     {
-        // set default job attempts to 1 so that jobs can run without retry
-        $defaultAttempts = 1;
-
-        return $this->message->getProperty(self::ATTEMPT_COUNT_HEADERS_KEY, $defaultAttempts);
+        return Arr::get($this->decoded, 'attempts');
     }
 
     /**
@@ -111,7 +122,8 @@ class NsqJob extends Job implements JobContract
     {
         parent::delete();
 
-        $this->redis->deleteReserved($this->queue, $this);
+        //$this->nsq->getClient()->send(Packet::fin($this->payload()['id']));
+        //$this->nsq->getClient()->send(Packet::rdy(1));
     }
 
 
@@ -143,48 +155,19 @@ class NsqJob extends Job implements JobContract
      *
      * @return string
      */
-    public function getJobId(): string
+    public function getJobId()
     {
-        return $this->message->getCorrelationId();
+        return Arr::get($this->decoded, 'id');
     }
 
-    /**
-     * Sets the job identifier.
-     *
-     * @param string $id
-     *
-     * @return void
-     */
-    public function setJobId($id)
+
+    public function getClient()
     {
-        $this->connection->setCorrelationId($id);
+        return $this->nsq->getClient();
     }
 
-    /**
-     * Unserialize job.
-     *
-     * @param array $body
-     *
-     * @throws Exception
-     *
-     * @return mixed
-     */
-    private function unserialize(array $body)
+    public function getMessage()
     {
-        try {
-            /** @noinspection UnserializeExploitsInspection */
-            return unserialize($body['data']['command']);
-        } catch (Exception $exception) {
-            if (
-                $this->causedByDeadlock($exception) ||
-                Str::contains($exception->getMessage(), ['detected deadlock'])
-            ) {
-                sleep(2);
-
-                return $this->unserialize($body);
-            }
-
-            throw $exception;
-        }
+        return Arr::get($this->decoded, 'message');
     }
 }

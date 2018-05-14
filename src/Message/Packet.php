@@ -4,13 +4,23 @@ namespace Jiyis\Nsq\Message;
 
 class Packet
 {
-    /**
-     * 通信协议
-     */
     const MAGIC = "  V2";
+    const IDENTIFY = "IDENTIFY";
+    const PING = "PING";
+    const SUB = "SUB";
+    const PUB = "PUB";
+    const MPUB = "MPUB";
+    const RDY = "RDY";
+    const FIN = "FIN";
+    const REQ = "REQ";
+    const TOUCH = "TOUCH";
+    const CLS = "CLS";
+    const NOP = "NOP";
+    const AUTH = "AUTH";
+
 
     /**
-     * 获取通信协议
+     * "Magic" identifier - for version we support
      *
      * @return string
      */
@@ -20,162 +30,167 @@ class Packet
     }
 
     /**
-     * 服务协商
+     * Update client metadata on the server and negotiate features
      *
-     * @param array $params
-     *
+     * @param array $config
      * @return string
      */
-    public static function identify(array $params)
+    public static function identify(array $config)
     {
-        $message = json_encode($params);
-        $cmd = self::packing('IDENTIFY');
-        $size = pack('N', strlen($message));
-        //$message=pack('N',$message);
-        return $cmd . $size . $message;
+        return self::packet(self::IDENTIFY, null, json_encode($config));
     }
 
     /**
-     * 订阅话题
+     * Liveness
      *
-     * @param $topic
-     * @param $channel
+     * @return string
+     */
+    public static function ping()
+    {
+        return self::packet(self::PING);
+    }
+
+    /**
+     * Subscribe to a topic/channel
      *
+     * @param string $topic
+     * @param string $channel
      * @return string
      */
     public static function sub($topic, $channel)
     {
-        return self::packing('SUB', $topic, $channel);
+        return self::packet(self::SUB, [$topic, $channel]);
     }
 
     /**
-     * 发布消息到话题
+     * Publish a message to a topic
      *
      * @param string $topic
-     * @param string $message
-     *
+     * @param string $data
      * @return string
      */
-    public static function pub($topic, $message)
+    public static function pub($topic, $data)
     {
-        $cmd = self::packing('PUB', $topic);
-        $size = pack('N', strlen($message));
-        return $cmd . $size . $message;
+        return self::packet(self::PUB, $topic, $data);
     }
 
     /**
-     * 批量推送消息到话题
+     * Publish multiple messages to a topic - atomically
      *
-     * @param $topic
-     * @param array $message
-     *
+     * @param string $topic
+     * @param array $data
      * @return string
      */
-    public static function mPub($topic, array $message)
+    public static function mpub($topic, array $data)
     {
-        $cmd = self::packing('MPUB', $topic);
-        $num = pack('N', count($message));
-        $bodyLen = 0;
-        $body = '';
-        foreach ($message as $msg) {
-            $len = strlen($msg);
-            $bodyLen += $len;
-            $body .= pack('N', $len) . $msg;
+        $msgs = '';
+        foreach ($data as $value) {
+            $msgs .= pack("N", strlen($value)) . $value;
         }
-        return $cmd . pack('N', $bodyLen) . $num . $body;
+
+        return sprintf("%s %s\n%s%s%s", self::MPUB, $topic, pack("N", strlen($msgs)), pack("N", count($data)), $msgs);
     }
 
     /**
-     * 准备接收$count条消息
+     * Update RDY state - indicate you are ready to receive N messages
      *
-     * @param $count
-     *
+     * @param int $count
      * @return string
      */
     public static function rdy($count)
     {
-        return self::packing('RDY', $count);
+        return self::packet(self::RDY, $count);
+    }
+
+
+    public static function timeout($time)
+    {
+        return self::packet('max-msg-timeout', $time);
     }
 
     /**
-     * 处理完成一个消息
+     * Finish a message
      *
-     * @param $messageId
-     *
+     * @param string $message_id
      * @return string
      */
-    public static function fin($messageId)
+    public static function fin($message_id)
     {
-        return self::packing('FIN', $messageId);
+        return self::packet(self::FIN, $message_id);
     }
 
     /**
-     * 重新排队
+     * Re-queue a message
      *
-     * @param $messageId
-     * @param $timeout
-     *
+     * @param string $message_id
+     * @param int $timeout In microseconds
      * @return string
      */
-    public static function req($messageId, $timeout)
+    public static function req($message_id, $timeout)
     {
-        return self::packing('REQ', $messageId, $timeout);
+        return self::packet(self::REQ, [$message_id, $timeout]);
     }
 
     /**
-     * 重置消息传输时间
+     * Reset the timeout for an in-flight message
      *
-     * @param $messageId
-     *
+     * @param string $message_id
      * @return string
      */
-    public static function touch($messageId)
+    public static function touch($message_id)
     {
-        return self::packing('TOUCH', $messageId);
+        return self::packet(self::TOUCH, $message_id);
     }
 
     /**
-     * 清除，不再收发消息
+     * Cleanly close
      *
      * @return string
      */
     public static function cls()
     {
-        return self::packing('CLS');
+        return self::packet(self::CLS);
     }
 
     /**
-     * 心跳反馈
+     * No-op
      *
      * @return string
      */
     public static function nop()
     {
-        return self::packing('NOP');
+        return self::packet(self::NOP);
     }
 
     /**
-     * 授权请求
+     * Auth for server
      *
-     * @param $secret 授权码
-     *
+     * @param string $password
      * @return string
      */
-    public static function auth($secret)
+    public static function auth($password)
     {
-        $cmd = self::packing('AUTH');
-        $size = pack('N', strlen($secret));
-        return $cmd . $size . $secret;
+        return self::packet(self::AUTH, null, $password);
     }
 
     /**
-     * 命令前缀
+     * Pack string
      *
+     * @param string $cmd
+     * @param mixed $params
+     * @param mixed $data
      * @return string
      */
-    public static function packing()
+    private static function packet($cmd, $params = null, $data = null)
     {
-        $args = func_get_args();
-        return implode(' ', $args) . "\n";
+        if (is_array($params)) {
+            $params = implode(' ', $params);
+        }
+
+        if ($data !== null) {
+            $data = pack('N', strlen($data)) . $data;
+        }
+
+        return sprintf("%s %s\n%s", $cmd, $params, $data);
     }
 }

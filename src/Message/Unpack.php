@@ -6,52 +6,67 @@ namespace Jiyis\Nsq\Message;
 class Unpack
 {
     /**
-     * 消息类型
+     * Frame types
      */
-    const FRAME_TYPE_RESPONSE = 0;//响应
-    const FRAME_TYPE_ERROR = 1;//错误响应
-    const FRAME_TYPE_MESSAGE = 2;//消息响应
+    const FRAME_TYPE_RESPONSE = 0;     //no response
+    const FRAME_TYPE_ERROR = 1;     //error response
+    const FRAME_TYPE_MESSAGE = 2;     //message response
 
     /**
-     * 心跳查询
+     * Heartbeat response content
      */
     const HEARTBEAT = '_heartbeat_';
 
     /**
-     * 成功响应体
+     * OK response content
      */
     const OK = 'OK';
 
-    public static function getFrame($receive = '')
+    
+    /**
+     * Read frame
+     *
+     * @param string $buffer
+     * @throws FrameException
+     * @return array With keys: type, data
+     */
+    public static function getFrame($buffer)
     {
-        $frame = [];
-        $type = self::getInt(substr($receive, 4, 4));
-        $frame['type'] = $type;
-        switch ($type) {
+        $frame = [
+            'size' => self::getInt(substr($buffer, 0, 4)),
+            'type' => self::getInt(substr($buffer, 4, 4))
+        ];
+
+
+        switch ($frame['type']) {
             case self::FRAME_TYPE_RESPONSE:
-                $frame['msg'] = substr($receive, 8);
+                $frame['response'] = substr($buffer, 8);
                 break;
+
             case self::FRAME_TYPE_ERROR:
-                $frame['msg'] = substr($receive, 8);
+                $frame['error'] = substr($buffer, 8);
                 break;
+
             case self::FRAME_TYPE_MESSAGE:
-                //纳秒级时间戳
-                $frame['timestamp'] = self::getLong(substr($receive, 8, 8));
-                //尝试次数
-                $frame['attempts'] = self::getShort(substr($receive, 16, 2));
-                //消息id
-                $frame['id'] = self::getString(substr($receive, 18, 16));
-                //消息内容
-                $frame['msg'] = substr($receive, 34);
+                //nanosecond unix timestamp
+                $frame['timestamp'] = self::getLong(substr($buffer, 8, 8));
+                // queue retry attempts
+                $frame['attempts'] = self::getShort(substr($buffer, 16, 2));
+                //message id
+                $frame['id'] = self::getString(substr($buffer, 18, 16));
+                //message body
+                $frame['message'] = substr($buffer, 34);
                 break;
+
             default:
-                throw new MessageException('未知的消息类型', -1);
+                throw new FrameException(substr($buffer, 8));
         }
+
         return $frame;
     }
 
     /**
-     * 消息类型检查
+     * Test if frame is a message frame
      *
      * @param array $frame
      * @param $type
@@ -61,13 +76,13 @@ class Unpack
      */
     private static function checkMessage(array $frame, $type, $response = null)
     {
-        return isset($frame['type'], $frame['msg'])
+        return isset($frame['type'], $frame['message'])
             && $frame['type'] === $type
-            && ($response === NULL || $frame['msg'] === $response);
+            && ($response === NULL || $frame['message'] === $response);
     }
 
     /**
-     * 是否是响应消息
+     * Test if is an responsee
      *
      * @param $frame
      *
@@ -79,7 +94,7 @@ class Unpack
     }
 
     /**
-     * 是否是消费消息
+     * Test if frame is a message frame
      *
      * @param $frame
      *
@@ -91,7 +106,7 @@ class Unpack
     }
 
     /**
-     * 是否是心跳检查
+     * Test if frame is heartbeat
      *
      * @param $frame
      *
@@ -104,7 +119,7 @@ class Unpack
     }
 
     /**
-     * 是否是成功响应
+     * Test if frame is OK
      *
      * @param $frame
      *
@@ -116,7 +131,7 @@ class Unpack
     }
 
     /**
-     * 是否是错误响应
+     * Test if frame is an error esponse
      *
      * @param $frame
      *
@@ -128,7 +143,7 @@ class Unpack
     }
 
     /**
-     * 获取4字节整型数据
+     * Read and unpack integer (4 bytes)
      *
      * @param $param
      *
@@ -136,12 +151,12 @@ class Unpack
      */
     private static function getInt($param)
     {
-        $param = unpack('N', $param);
-        $data = reset($param);
-        if (PHP_INT_SIZE !== 4) {
-            $data = sprintf('%u', $data);
+        list(, $size) = unpack('N', $param);
+        if ((PHP_INT_SIZE !== 4)) {
+            $size = sprintf("%u", $size);
         }
-        return intval($data);
+
+        return (int)$size;
     }
 
     /**
@@ -151,12 +166,13 @@ class Unpack
      */
     private static function getShort($param)
     {
-        $param = unpack('n', $param);
-        return reset($param);
+        list(, $res) = unpack('n', $param);
+
+        return $res;
     }
 
     /**
-     * 解包8位长整型
+     * Read and unpack long (8 bytes)
      *
      * @param $param
      *
@@ -165,29 +181,31 @@ class Unpack
     private static function getLong($param)
     {
         $hi = unpack('N', substr($param, 0, 4));
-        $lo = unpack('N', substr($param, 4));
+        $lo = unpack('N', substr($param, 4, 4));
+
+        // workaround signed/unsigned braindamage in php
         $hi = sprintf("%u", $hi[1]);
         $lo = sprintf("%u", $lo[1]);
 
-        return \bcadd(bcmul($hi, "4294967296"), $lo);
+        return bcadd(bcmul($hi, "4294967296"), $lo);
     }
 
     /**
-     * 解包16位字符串
-     *
+     * Read and unpack string
      * @param $param
-     *
+     * @param int $size
      * @return string
      */
-    private static function getString($param)
+    private static function getString($param, $size = 16)
     {
-        $temp = unpack("c16chars", $param);
+        $temp = unpack("c{$size}chars", $param);
         $out = "";
         foreach ($temp as $v) {
             if ($v > 0) {
                 $out .= chr($v);
             }
         }
+
         return $out;
     }
 }

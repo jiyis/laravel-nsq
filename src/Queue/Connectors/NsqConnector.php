@@ -8,38 +8,27 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Queue\Queue;
 use Illuminate\Queue\Connectors\ConnectorInterface;
 use Illuminate\Queue\Events\WorkerStopping;
+use Illuminate\Support\Arr;
 use Interop\Amqp\AmqpConnectionFactory as InteropAmqpConnectionFactory;
 use Interop\Amqp\AmqpConnectionFactory;
 use Interop\Amqp\AmqpContext;
-use Jiyis\Nsq\Contracts\NsqAdapter;
+use Jiyis\Nsq\Adapter\SwooleNsqClient;
+use Jiyis\Nsq\Queue\Manager\NsqManager;
 use Jiyis\Nsq\Queue\NsqQueue;
 
 class NsqConnector implements ConnectorInterface
 {
 
-    /**
-     * The Redis database instance.
-     *
-     * @var \Jiyis\Nsq\Contracts\NsqAdapter
-     */
-    protected $nsq;
+    protected $topic;
+    protected $channel;
+    protected $consumerJob;
 
-    /**
-     * The connection name.
-     *
-     * @var string
-     */
-    protected $connection;
-
-    /**
-     * NsqConnector constructor.
-     * @param NsqAdapter $nsq
-     * @param null $connection
-     */
-    public function __construct(NsqAdapter $nsq, $connection = null)
+    public function __construct()
     {
-        $this->nsq = $nsq;
-        $this->connection = $connection;
+        $input = new \Symfony\Component\Console\Input\ArgvInput();
+        $this->topic = $input->getParameterOption('--topic');
+        $this->channel = $input->getParameterOption('--channel');
+        $this->consumerJob = $input->getParameterOption('--job');
     }
 
 
@@ -51,9 +40,10 @@ class NsqConnector implements ConnectorInterface
      */
     public function connect(array $config)
     {
+
         return new NsqQueue(
-            $this->nsq, $config['queue'],
-            Arr::get($config, 'connection', $this->connection),
+            new SwooleNsqClient($config, $this->topic, $this->channel),
+            $this->consumerJob,
             Arr::get($config, 'retry_delay_time', 60)
         );
     }
