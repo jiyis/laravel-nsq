@@ -2,27 +2,42 @@
 
 namespace Jiyis\Nsq\Queue;
 
-use App\Jobs\AwardGenerate;
-use App\Jobs\AwardGenerateCheck;
-use App\Jobs\NsqTestJob;
 use Illuminate\Contracts\Queue\Queue as QueueContract;
 use Illuminate\Queue\Queue;
-use Jiyis\Nsq\Adapter\SwooleNsqClient;
+use Illuminate\Support\Facades\Log;
+use Jiyis\Nsq\Adapter\NsqClientManager;
+use Jiyis\Nsq\Exception\FrameException;
+use Jiyis\Nsq\Exception\PublishException;
+use Jiyis\Nsq\Exception\SubscribeException;
 use Jiyis\Nsq\Message\Packet;
 use Jiyis\Nsq\Message\Unpack;
 use Jiyis\Nsq\Queue\Jobs\NsqJob;
-use Jiyis\Nsq\Queue\Manager\NsqManager;
-use Mockery\Exception;
 
 class NsqQueue extends Queue implements QueueContract
 {
-    /**
-     * The nsq factory implementation.
-     *
-     */
-    protected $nsq;
-    protected $consumerJob;
 
+    const PUB_ONE = 1;
+    const PUB_TWO = 2;
+    const PUB_QUORUM = 5;
+
+    /**
+     * nsq tcp client pool
+     * @var NsqClientManager
+     */
+    protected $pool;
+
+
+    /**
+     * current nsq tcp client
+     * @var NsqClientManager
+     */
+    protected $currentClient;
+
+    /**
+     * nsq consumer job
+     * @var
+     */
+    protected $consumerJob;
 
     /**
      * The expiration time of a job.
@@ -32,186 +47,306 @@ class NsqQueue extends Queue implements QueueContract
     protected $retryAfter = 60;
 
     /**
+     * nsq pub number
+     * @var
+     */
+    protected $pubSuccessCount;
+
+
+    /**
      * NsqQueue constructor.
-     * @param NsqManager $nsq
+     * @param NsqClientManager $client
+     * @param $consumerJob
      * @param int $retryAfter
      */
-    public function __construct(SwooleNsqClient $nsq, string $consumerJob, $retryAfter = 60)
+    public function __construct(NsqClientManager $client, $consumerJob, $retryAfter = 60)
     {
-        $this->nsq = $nsq;
+        $this->pool = $client;
         $this->consumerJob = $consumerJob;
         $this->retryAfter = $retryAfter;
     }
 
-    /** @inheritdoc */
+    /**
+     * @param null $queueName
+     * @return int
+     */
     public function size($queueName = null): int
     {
-        /** @var AmqpQueue $queue */
-        list($queue) = $this->declareEverything($queueName);
-
-        return $this->context->declareQueue($queue);
+        // get from nsqadmin
     }
 
     /**
      * Push a new job onto the queue.
      *
-     * @param  string  $job
-     * @param  mixed   $data
-     * @param  string  $queue
+     * @param  string $job
+     * @param  mixed $data
+     * @param  string $queue
      * @return mixed
      */
     public function push($job, $data = '', $queue = null)
     {
-        return $this->pushRaw($queue, $this->createPayload($job, $data));
+        return $this->pushRaw($this->createNsqPayload($job, $data), $queue);
     }
 
     /**
      * Push a raw payload onto the queue.
      *
-     * @param  string  $payload
-     * @param  string  $queue
-     * @param  array   $options
+     * @param  string $payload
+     * @param  string $queue
+     * @param  array $options
      * @return mixed
      */
     public function pushRaw($payload, $queue = null, array $options = [])
     {
-        $this->getConnection()->rpush($this->getQueue($queue), $payload);
-
-        return Arr::get(json_decode($payload, true), 'id');
-    }
-
-    /** @inheritdoc */
-    public function later($delay, $job, $data = '', $queue = null)
-    {
-        return $this->pushRaw($this->createPayload($job, $data), $queue, ['delay' => $this->secondsUntil($delay)]);
+        $payload = json_decode($payload, true);
+        $data = $payload['data'];
+        $job = unserialize($payload['job']);
+        if (empty($data)) {
+            $data = unserialize($payload['job'])->payload;
+        }
+        $this->publishTo(1);
+        return $this->publishTo(1)->publish($job->topic, json_encode($data));
     }
 
     /**
-     * Release a reserved job back onto the queue.
-     *
-     * @param  \DateTimeInterface|\DateInterval|int $delay
-     * @param  string|object $job
-     * @param  mixed $data
-     * @param  string $queue
-     * @param  int $attempts
+     * @param \DateTime|int $delay
+     * @param string $job
+     * @param string $data
+     * @param null $queue
      * @return mixed
      */
-    public function release($delay, $job, $data, $queue, $attempts = 0)
+    public function later($delay, $job, $data = '', $queue = null)
     {
-        return $this->pushRaw($this->createPayload($job, $data), $queue, [
-            'delay'    => $this->secondsUntil($delay),
-            'attempts' => $attempts
-        ]);
+        return $this->pushRaw($this->createNsqPayload($job, $data), $queue, ['delay' => $this->secondsUntil($delay)]);
     }
 
-    /** @inheritdoc */
+    /**
+     * Pop the next job off of the queue.
+     *
+     * @param null $queue
+     * @return \Illuminate\Contracts\Queue\Job|NsqJob|null
+     */
     public function pop($queue = null)
     {
         try {
+            foreach ($this->pool->getConsumerPool() as $key => $client) {
+                // if lost connection  try connect
+                //Log::info(socket_strerror($client->getClient()->errCode));
+                if (!$client->isConnected()) {
+                    $this->pool->setConsumerPool($key);
+                }
 
-            $data = @$this->nsq->getClient()->recv();
-            if($data == false) return null;
-            $frame = Unpack::getFrame($data);
+                $this->currentClient = $client;
 
-            if (Unpack::isHeartbeat($frame)) {
-                $this->nsq->send(Packet::nop());
-            } elseif (Unpack::isOk($frame)) {
-                $this->nsq->send(Packet::rdy(1));
-            } elseif (Unpack::isError($frame)) {
-                return null;
-            } elseif (Unpack::isMessage($frame)) {
+                $data = $this->currentClient->receive();
 
-                $rawBody = $this->createNsqPayload($this->consumerJob, $frame);
-                return new NsqJob($this->container, $this, json_encode($rawBody), $queue, $this->connectionName);
-            }  else {
+                // if no message return null
+                if ($data == false) continue;
 
+                // unpack message
+                $frame = Unpack::getFrame($data);
+
+                if (Unpack::isHeartbeat($frame)) {
+                    Log::info($key . "sending heartbeat");
+                    $this->currentClient->send(Packet::nop());
+                } elseif (Unpack::isOk($frame)) {
+                    continue;
+                } elseif (Unpack::isError($frame)) {
+                    continue;
+                } elseif (Unpack::isMessage($frame)) {
+                    $rawBody = $this->adapterNsqPayload($this->consumerJob, $frame);
+                    return new NsqJob($this->container, $this, $rawBody, $queue);
+                } else {
+
+                }
             }
 
-            // mark as done; get next on the way
-           /* $client->send(fin($frame['id']));
-            $client->send(rdy(1));*/
+            return null;
 
-        } catch (\Exception $exception) {
-            throw new Exception($exception->getMessage());
-            //$this->reportConnectionError('pop', $exception);
+        } catch (\Throwable $exception) {
+            throw new SubscribeException($exception->getMessage());
         }
-
-        return null;
     }
 
     /**
-     * Get the underlying Nsq instance.
-     * @return NsqManager
-     */
-    public function getClient()
-    {
-        return $this->nsq->getClient();
-    }
-
-    /**
-     * Get the connection for the queue.
-     *
-     * @return \Predis\ClientInterface
-     */
-    protected function getConnection()
-    {
-        return $this->nsq->connection($this->connection);
-    }
-
-    /**
-     * @param mixed $job
-     * @param string $data
-     * @param null $queue
+     * pub to nsqd
+     * @param $job
+     * @param $data
      * @return string
      */
-    protected function createNsqPayload($job, $data = '', $queue = null)
+    protected function createNsqPayload($job, $data)
     {
-        $job = resolve($job);
+        return json_encode([
+            'data' => $data,
+            'job'  => serialize($job)
+        ]);
+    }
+
+    /**
+     * adapter nsq queue job body type
+     * @param $job
+     * @param array $data
+     * @return string
+     * @throws \Exception
+     */
+    protected function adapterNsqPayload($job, array $data)
+    {
         $message = $data['message'];
-        unset($data['message']);
-        return array_merge(
+
+        $payload = json_encode(array_merge(
             [
                 'displayName' => $this->getDisplayName($job),
-                'job' => 'Illuminate\Queue\CallQueuedHandler@call',
-                'maxTries' => isset($job->tries) ? $job->tries : null,
-                'timeout' => isset($job->timeout) ? $job->timeout : null,
-                'message' => $message,
-                'data' => [
+                'job'         => 'Illuminate\Queue\CallQueuedHandler@call',
+                'maxTries'    => isset($job->tries) ? $job->tries : null,
+                'timeout'     => isset($job->timeout) ? $job->timeout : null,
+                'message'     => $message,
+                'data'        => [
                     'commandName' => get_class($job),
-                    'command' => serialize(clone $job),
+                    'command'     => serialize(clone $job),
                 ],
             ],
-            $data
-        );
-        return [
-            'displayName' => $this->getDisplayName($job),
-            'job' => 'Illuminate\Queue\CallQueuedHandler@call',
-            'maxTries' => isset($job->tries) ? $job->tries : null,
-            'timeout' => isset($job->timeout) ? $job->timeout : null,
-            'message' => $data['message'],
-            'data' => [
-                'commandName' => get_class($job),
-                'command' => serialize(clone $job),
-            ],
-        ];
-        $payload = json_encode([
-            'msg'                   => $data,
-            'composite_http_header' => [
-                "request_id"         => config('request_id'),
-                "authorization"      => config('authorization'),
-                "app_key"            => config('app_key'),
-                "consumer_tenant_id" => config('tenant_id'),
-                "consumer_user_id"   => config('user_id'),
+            [
+                'attempts' => $data['attempts'],
+                'id'       => $data['id'],
             ]
-        ]);
+        ));
 
         if (JSON_ERROR_NONE !== json_last_error()) {
-            throw new InvalidPayloadException(
-                'Unable to JSON encode payload. Error code: '.json_last_error()
+            throw new \Exception(
+                'Unable to JSON encode payload. Error code: ' . json_last_error()
             );
         }
 
         return $payload;
+    }
+
+    /**
+     * Get the underlying Nsq instance.
+     * @return NsqClientManager
+     */
+    public function getClientPool()
+    {
+        return $this->pool;
+    }
+
+    /**
+     * Get the connection for the queue.
+     * @return mixed
+     */
+    public function getCurrentClient()
+    {
+        return $this->currentClient;
+    }
+
+    /**
+     * Define nsqd hosts to publish to
+     *
+     * We'll remember these hosts for any subsequent publish() call, so you
+     * only need to call this once to publish
+     *
+     * @param int $cl      Consistency level - basically how many `nsqd`
+     *                     nodes we need to respond to consider a publish successful
+     *                     The default value is nsqphp::PUB_ONE
+     *
+     * @throws \InvalidArgumentException If bad CL provided
+     * @throws \InvalidArgumentException If we cannot achieve the desired CL
+     *      (eg: if you ask for PUB_TWO but only supply one node)
+     *
+     * @return $this
+     */
+    public function publishTo($cl = self::PUB_ONE)
+    {
+
+        $producerPoolSize = count($this->pool->getProducerPool());
+
+        switch ($cl) {
+            case self::PUB_ONE:
+            case self::PUB_TWO:
+                $this->pubSuccessCount = $cl;
+                break;
+
+            case self::PUB_QUORUM:
+                $this->pubSuccessCount = ceil($producerPoolSize / 2) + 1;
+                break;
+
+            default:
+                throw new FrameException('Invalid consistency level');
+                break;
+        }
+
+        if ($this->pubSuccessCount > $producerPoolSize) {
+            throw new PublishException(
+                sprintf('Cannot achieve desired consistency level with %s nodes', $producerPoolSize)
+            );
+        }
+
+        return $this;
+    }
+
+    /**
+     * Publish message
+     *
+     * @param string $topic     A valid topic name: [.a-zA-Z0-9_-] and 1 < length < 32
+     * @param string|array $msg array: multiple messages
+     * @param int $tries        Retry times
+     *
+     * @throws PublishException If we don't get "OK" back from server
+     *      (for the specified number of hosts - as directed by `publishTo`)
+     *
+     * @return $this
+     */
+    public function publish($topic, $msg, $tries = 1)
+    {
+        $producerPool = $this->pool->getProducerPool();
+        // pick a random
+        shuffle($producerPool);
+
+        $success = 0;
+        $errors = [];
+        foreach ($producerPool as $producer) {
+            try {
+                for ($run = 0; $run <= $tries; $run++) {
+                    try {
+                        $payload = is_array($msg) ? Packet::mpub($topic, $msg) : Packet::pub($topic, $msg);
+                        $producer->send($payload);
+                        $frame = Unpack::getFrame($producer->receive());
+
+                        while (Unpack::isHeartbeat($frame)) {
+                            $producer->send(Packet::nop());
+                            $frame = Unpack::getFrame($producer->receive());
+                        }
+
+                        if (Unpack::isOK($frame)) {
+                            $success++;
+                        } else {
+                            $errors[] = $frame['error'];
+                        }
+
+                        break;
+                    } catch (\Throwable $e) {
+                        if ($run >= $tries) {
+                            throw $e;
+                        }
+
+                        $producer->reconnect();
+                    }
+                }
+            } catch (\Throwable $e) {
+                $errors[] = $e->getMessage();
+            }
+
+            if ($success >= $this->pubSuccessCount) {
+                break;
+            }
+        }
+
+        if ($success < $this->pubSuccessCount) {
+            throw new PublishException(
+                sprintf('Failed to publish message; required %s for success, achieved %s. Errors were: %s', $this->pubSuccessCount, $success, implode(', ', $errors))
+            );
+        }
+
+        return $this;
     }
 
 

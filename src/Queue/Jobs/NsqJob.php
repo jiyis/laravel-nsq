@@ -18,9 +18,9 @@ class NsqJob extends Job implements JobContract
     /**
      * The nsq queue instance.
      *
-     * @var \Illuminate\Queue\RedisQueue
+     * @var NsqQueue
      */
-    protected $nsq;
+    protected $nsqQueue;
 
     /**
      * The nsq raw job payload.
@@ -50,16 +50,14 @@ class NsqJob extends Job implements JobContract
 
     public function __construct(
         Container $container,
-        NsqQueue $nsq,
+        NsqQueue $nsqQueue,
         $job,
-        $queue,
-        $connectionName
+        $queue
     ) {
         $this->container = $container;
         $this->job = $job;
-        $this->nsq = $nsq;
+        $this->nsqQueue = $nsqQueue;
         $this->queue = $queue;
-        $this->connectionName = $connectionName;
         $this->decoded = $this->payload();
     }
 
@@ -115,39 +113,28 @@ class NsqJob extends Job implements JobContract
 
     /**
      * Delete the job from the queue.
-     *
+     * success handle job
      * @return void
      */
     public function delete()
     {
         parent::delete();
 
-        //$this->nsq->getClient()->send(Packet::fin($this->payload()['id']));
-        //$this->nsq->getClient()->send(Packet::rdy(1));
+        $this->getCurrentClient()->send(Packet::fin($this->getJobId()));
+        $this->getCurrentClient()->send(Packet::rdy(1));
     }
 
 
-    /** @inheritdoc */
+    /**
+     * Re-queue a message
+     * @param int $delay
+     * @return mixed|void
+     */
     public function release($delay = 0)
     {
         parent::release($delay);
 
-        $this->delete();
-
-        $body = $this->payload();
-
-        /*
-         * Some jobs don't have the command set, so fall back to just sending it the job name string
-         */
-        if (isset($body['data']['command']) === true) {
-            $job = $this->unserialize($body);
-        } else {
-            $job = $this->getName();
-        }
-
-        $data = $body['data'];
-
-        $this->connection->release($delay, $job, $data, $this->getQueue(), $this->attempts() + 1);
+        $this->getCurrentClient()->send(Packet::req($this->getJobId(), $delay));
     }
 
     /**
@@ -160,12 +147,28 @@ class NsqJob extends Job implements JobContract
         return Arr::get($this->decoded, 'id');
     }
 
-
-    public function getClient()
+    /**
+     * get nsq swoole client pool
+     * @return NsqQueue|string
+     */
+    public function getQueue()
     {
-        return $this->nsq->getClient();
+        return $this->nsqQueue;
     }
 
+    /**
+     * get current nsq swoole client
+     * @return NsqQueue|string
+     */
+    public function getCurrentClient()
+    {
+        return $this->getQueue()->getCurrentClient();
+    }
+
+    /**
+     * get nsq body message
+     * @return mixed
+     */
     public function getMessage()
     {
         return Arr::get($this->decoded, 'message');

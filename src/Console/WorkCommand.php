@@ -1,29 +1,37 @@
 <?php
+
 namespace Jiyis\Nsq\Console;
 
 use Illuminate\Queue\Console\WorkCommand as BaseWorkCommand;
+use Illuminate\Queue\Worker;
+use Illuminate\Support\Facades\Config;
 
 class WorkCommand extends BaseWorkCommand
 {
 
     /**
-     * The console command name.
+     * Create a new queue work command.
      *
-     * @var string
+     * @param  \Illuminate\Queue\Worker $worker
+     * @return void
      */
-    protected $signature = 'queue:work
-                            {connection? : The name of the queue connection to work}
-                            {--queue= : The names of the queues to work}
-                            {--daemon : Run the worker in daemon mode (Deprecated)}
-                            {--once : Only process the next job on the queue}
-                            {--delay=0 : The number of seconds to delay failed jobs}
-                            {--force : Force the worker to run even in maintenance mode}
-                            {--memory=128 : The memory limit in megabytes}
-                            {--sleep=3 : Number of seconds to sleep when no job is available}
-                            {--timeout=60 : The number of seconds a child process can run}
-                            {--tries=0 : Number of times to attempt a job before logging it failed}
-                            {--job=App\Jobs\NsqTestJob : The consumer namespace}
-                            {--topic=test : The nsq topic name}
-                            {--channel=test : The nsq channel name}';
+    public function __construct(Worker $worker)
+    {
+        $this->signature .= "{--job= : The consumer namespace}";
+        parent::__construct($worker);
+    }
+
+
+    /**
+     * Execute the console command.
+     *
+     * @return void
+     */
+    public function fire()
+    {
+        $this->hasOption('job') && Config::set(['consumer_job' => $this->option('job')]);
+
+        return parent::fire();
+    }
 
 }

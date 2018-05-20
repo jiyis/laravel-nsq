@@ -40,7 +40,7 @@ class Unpack
 
         switch ($frame['type']) {
             case self::FRAME_TYPE_RESPONSE:
-                $frame['response'] = substr($buffer, 8);
+                $frame['message'] = substr($buffer, 8);
                 break;
 
             case self::FRAME_TYPE_ERROR:
