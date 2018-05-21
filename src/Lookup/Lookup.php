@@ -2,7 +2,6 @@
 
 namespace Jiyis\Nsq\Lookup;
 
-
 use Illuminate\Support\Facades\Log;
 use Jiyis\Nsq\Exception\LookupException;
 

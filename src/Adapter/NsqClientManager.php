@@ -87,7 +87,6 @@ class NsqClientManager
      */
     public function connect()
     {
-
         /**
          * if topic and channel is not null, then the command is sub
          */
@@ -171,10 +170,10 @@ class NsqClientManager
     }
 
     /**
-     * get nsq consumer job
+     * get nsq job
      * @return mixed
      */
-    public function getConsumerJob()
+    public function getJob()
     {
         return $this->consumerJob;
     }

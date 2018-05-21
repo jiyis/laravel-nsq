@@ -5,7 +5,10 @@ namespace Jiyis\Nsq\Monitor;
 
 abstract class AbstractMonitor
 {
-
+    /**
+     * current client
+     * @var
+     */
     protected $client;
 
     /**

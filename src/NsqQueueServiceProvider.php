@@ -2,8 +2,6 @@
 
 namespace Jiyis\Nsq;
 
-use Illuminate\Queue\Events\JobProcessed;
-use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
@@ -19,7 +17,7 @@ class NsqQueueServiceProvider extends ServiceProvider
      *
      * @var bool
      */
-    //protected $defer = true;
+    protected $defer = true;
 
 
     /**
@@ -52,11 +50,6 @@ class NsqQueueServiceProvider extends ServiceProvider
 
         $queue->addConnector('nsq', function () {
             return new NsqConnector;
-        });
-        
-        Queue::after(function (JobProcessed $event) {
-            $event->job->getClient()->send(Packet::fin($event->job->getJobId()));
-            $event->job->getClient()->send(Packet::rdy(1));
         });
 
     }

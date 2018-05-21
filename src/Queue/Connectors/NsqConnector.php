@@ -19,9 +19,10 @@ class NsqConnector implements ConnectorInterface
     public function connect(array $config)
     {
         $client = new NsqClientManager($config);
+
         return new NsqQueue(
             $client,
-            $client->getConsumerJob(),
+            $client->getJob(),
             Arr::get($config, 'retry_delay_time', 60)
         );
     }

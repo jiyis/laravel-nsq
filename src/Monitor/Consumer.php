@@ -69,7 +69,6 @@ class Consumer extends AbstractMonitor
         $this->client->set(Arr::get($this->config, 'client.options'));
 
         list($host, $port) = explode(':', $this->host);
-        $host = '127.0.0.1';
         // connect nsq server
         if (!$this->client->connect($host, $port, 3)) {
             throw new \Exception('connect nsq server failed.');

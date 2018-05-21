@@ -72,7 +72,7 @@ class NsqQueue extends Queue implements QueueContract
      */
     public function size($queueName = null): int
     {
-        // get from nsqadmin
+        //todo get from nsqadmin
     }
 
     /**
