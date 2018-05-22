@@ -12,13 +12,6 @@ use Jiyis\Nsq\Queue\Connectors\NsqConnector;
 class NsqQueueServiceProvider extends ServiceProvider
 {
 
-    /**
-     * Indicates if loading of the provider is deferred.
-     *
-     * @var bool
-     */
-    protected $defer = true;
-
 
     /**
      * Register the service provider.
@@ -54,13 +47,4 @@ class NsqQueueServiceProvider extends ServiceProvider
 
     }
 
-    /**
-     * 取得提供者提供的服务
-     *
-     * @return array
-     */
-    public function provides()
-    {
-        return [WorkCommand::class];
-    }
 }

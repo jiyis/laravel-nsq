@@ -5,8 +5,8 @@ namespace Jiyis\Nsq\Queue\Jobs;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Queue\Job as JobContract;
 use Illuminate\Queue\Jobs\Job;
-use Illuminate\Queue\Jobs\JobName;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Config;
 use Jiyis\Nsq\Queue\NsqQueue;
 use Jiyis\Nsq\Message\Packet;
 
@@ -93,7 +93,7 @@ class NsqJob extends Job implements JobContract
         // sending to client set success
         $this->getCurrentClient()->send(Packet::fin($this->getJobId()));
         // receive form client
-        $this->getCurrentClient()->send(Packet::rdy(Arr::get($this->config, 'options.rdy', 1)));
+        $this->getCurrentClient()->send(Packet::rdy(Config::get('nsq.options.rdy', 1)));
     }
 
 

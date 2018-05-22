@@ -33,6 +33,7 @@ return [
     'options' => [
         //Update RDY state (indicate you are ready to receive N messages)
         'rdy' => 1,
+        'cl'  => 1
     ],
 
 

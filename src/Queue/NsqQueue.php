@@ -4,6 +4,7 @@ namespace Jiyis\Nsq\Queue;
 
 use Illuminate\Contracts\Queue\Queue as QueueContract;
 use Illuminate\Queue\Queue;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Jiyis\Nsq\Adapter\NsqClientManager;
 use Jiyis\Nsq\Exception\FrameException;
@@ -104,8 +105,8 @@ class NsqQueue extends Queue implements QueueContract
         if (empty($data)) {
             $data = unserialize($payload['job'])->payload;
         }
-        $this->publishTo(1);
-        return $this->publishTo(1)->publish($job->topic, json_encode($data));
+
+        return $this->publishTo(Config::get('nsq.options.cl', 1))->publish($job->topic, json_encode($data));
     }
 
     /**
