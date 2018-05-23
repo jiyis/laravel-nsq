@@ -332,7 +332,7 @@ class NsqQueue extends Queue implements QueueContract
         $errors = [];
         foreach ($producerPool as $producer) {
             try {
-                for ($run = 0; $run <= $tries; $run++) {
+                for ($run = 0; $run < $tries; $run++) {
                     try {
                         $payload = is_array($msg) ? Packet::mpub($topic, $msg) : Packet::pub($topic, $msg);
                         $producer->send($payload);
