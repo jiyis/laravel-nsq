@@ -4,6 +4,7 @@ namespace Jiyis\Nsq\Adapter;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 use Jiyis\Nsq\Lookup\Lookup;
 use Jiyis\Nsq\Monitor\Consumer;
 use Jiyis\Nsq\Monitor\Producer;
@@ -53,6 +54,12 @@ class NsqClientManager
      */
     protected $channel = null;
 
+    /**
+     * connect time
+     * @var
+     */
+    protected $connectTime;
+
 
     /**
      * NsqClientManager constructor.
@@ -87,11 +94,13 @@ class NsqClientManager
      */
     public function connect()
     {
+        $this->connectTime = time();
         /**
          * if topic and channel is not null, then the command is sub
          */
         if (Config::get('consumer_job')) {
             $this->reflectionJob();
+
             $lookup = new Lookup(Arr::get($this->config, 'connection.nsqlookup_url', ['127.0.0.1:4161']));
             $nsqdList = $lookup->lookupHosts($this->topic);
 
@@ -176,5 +185,23 @@ class NsqClientManager
     public function getJob()
     {
         return $this->consumerJob;
+    }
+
+    /**
+     * get connect time
+     * @return int
+     */
+    public function getConnectTime()
+    {
+        return $this->connectTime;
+    }
+
+    /**
+     * set connect time
+     * @return int
+     */
+    public function setConnectTime($time)
+    {
+        return $this->connectTime = $time;
     }
 }

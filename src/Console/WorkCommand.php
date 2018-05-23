@@ -34,4 +34,18 @@ class WorkCommand extends BaseWorkCommand
         return parent::fire();
     }
 
+
+    /**
+     * Execute the console command.
+     *
+     * @return void
+     */
+    public function handle()
+    {
+        $this->hasOption('job') && Config::set(['consumer_job' => $this->option('job')]);
+
+        return parent::handle();
+    }
+
+
 }

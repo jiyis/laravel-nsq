@@ -130,6 +130,7 @@ class NsqQueue extends Queue implements QueueContract
     public function pop($queue = null)
     {
         try {
+            $response = null;
             foreach ($this->pool->getConsumerPool() as $key => $client) {
                 // if lost connection  try connect
                 //Log::info(socket_strerror($client->getClient()->errCode));
@@ -148,7 +149,7 @@ class NsqQueue extends Queue implements QueueContract
                 $frame = Unpack::getFrame($data);
 
                 if (Unpack::isHeartbeat($frame)) {
-                    Log::info($key . "sending heartbeat");
+                    //Log::info($key . "sending heartbeat");
                     $this->currentClient->send(Packet::nop());
                 } elseif (Unpack::isOk($frame)) {
                     continue;
@@ -156,16 +157,41 @@ class NsqQueue extends Queue implements QueueContract
                     continue;
                 } elseif (Unpack::isMessage($frame)) {
                     $rawBody = $this->adapterNsqPayload($this->consumerJob, $frame);
-                    return new NsqJob($this->container, $this, $rawBody, $queue);
+                    $response = new NsqJob($this->container, $this, $rawBody, $queue);
                 } else {
 
                 }
             }
 
-            return null;
+            $this->refreshClient();
+
+            return $response;
 
         } catch (\Throwable $exception) {
             throw new SubscribeException($exception->getMessage());
+        }
+    }
+
+    /**
+     * refresh nsq client form nsqlookupd result
+     */
+    protected function refreshClient()
+    {
+        // check connect time
+        $connectTime = $this->pool->getConnectTime();
+        if (time() - $connectTime >= 60 * 5) {
+            foreach ($this->pool->getConsumerPool() as $key => $client) {
+                $client->close();
+            }
+            $queueManager = app('queue');
+            $reflect = new \ReflectionObject($queueManager);
+            $property = $reflect->getProperty('connections');
+            $property->setAccessible(true);
+            //remove nsq
+            $connections = $property->getValue($queueManager);
+            unset($connections['nsq']);
+            $property->setValue($queueManager, $connections);
+            Log::info("refresh nsq client success.");
         }
     }
 

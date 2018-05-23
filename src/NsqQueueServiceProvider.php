@@ -2,16 +2,12 @@
 
 namespace Jiyis\Nsq;
 
-use Illuminate\Queue\QueueManager;
-use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
-use Jiyis\Nsq\Console\WorkCommand;
-use Jiyis\Nsq\Message\Packet;
+use Jiyis\Nsq\Provider\WorkCommandProvider;
 use Jiyis\Nsq\Queue\Connectors\NsqConnector;
 
 class NsqQueueServiceProvider extends ServiceProvider
 {
-
 
     /**
      * Register the service provider.
@@ -24,10 +20,6 @@ class NsqQueueServiceProvider extends ServiceProvider
             __DIR__ . '/../config/nsq.php', 'queue.connections.nsq'
         );
 
-        // rebind queue console command
-        $this->app->singleton('command.queue.work', function ($app) {
-            return new WorkCommand($app['queue.worker']);
-        });
 
     }
 
@@ -44,6 +36,8 @@ class NsqQueueServiceProvider extends ServiceProvider
         $queue->addConnector('nsq', function () {
             return new NsqConnector;
         });
+        // add defer provider, rebind work command
+        $this->app->addDeferredServices([WorkCommandProvider::class]);
 
     }
 
