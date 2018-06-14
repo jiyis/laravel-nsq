@@ -76,6 +76,9 @@ class Consumer extends AbstractMonitor
         // send magic to nsq server
         $this->client->send(Packet::magic());
 
+        // send identify params
+        $this->client->send(Packet::identify(Arr::get($this->config, 'identify')));
+
         // sub nsq topic and channel
         $this->client->send(Packet::sub($this->topic, $this->channel));
 

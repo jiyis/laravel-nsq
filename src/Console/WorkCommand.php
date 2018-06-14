@@ -21,20 +21,6 @@ class WorkCommand extends BaseWorkCommand
         parent::__construct($worker);
     }
 
-
-    /**
-     * Execute the console command.
-     *
-     * @return void
-     */
-    public function fire()
-    {
-        $this->hasOption('job') && Config::set(['consumer_job' => $this->option('job')]);
-
-        return parent::fire();
-    }
-
-
     /**
      * Execute the console command.
      *
@@ -44,7 +30,12 @@ class WorkCommand extends BaseWorkCommand
     {
         $this->hasOption('job') && Config::set(['consumer_job' => $this->option('job')]);
 
-        return parent::handle();
+        if (method_exists(get_parent_class($this), 'handle')) {
+            return parent::handle();
+        }
+
+        return parent::fire();
+
     }
 
 
