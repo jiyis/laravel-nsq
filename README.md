@@ -56,7 +56,7 @@ $str = [
     'user_id' => 1
 ];
 // not supported dispatch
-Queue::connection('nsq')->push(new NsqTestJob, json_decode($str, true));
+Queue::connection('nsq')->push(new NsqTestJob, $str);
 ```
 #### Subscribe
 ```
