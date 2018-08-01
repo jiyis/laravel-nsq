@@ -164,7 +164,7 @@ class NsqQueue extends Queue implements QueueContract
                 }
             }
 
-            $this->refreshClient();
+            //$this->refreshClient();
 
             return $response;
 
