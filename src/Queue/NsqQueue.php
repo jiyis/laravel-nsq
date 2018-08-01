@@ -157,6 +157,7 @@ class NsqQueue extends Queue implements QueueContract
                     continue;
                 } elseif (Unpack::isMessage($frame)) {
                     $rawBody = $this->adapterNsqPayload($this->consumerJob, $frame);
+                    Log::info("Ready to process job.");
                     $response = new NsqJob($this->container, $this, $rawBody, $queue);
                 } else {
 

@@ -7,6 +7,7 @@ use Illuminate\Contracts\Queue\Job as JobContract;
 use Illuminate\Queue\Jobs\Job;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 use Jiyis\Nsq\Queue\NsqQueue;
 use Jiyis\Nsq\Message\Packet;
 
@@ -92,8 +93,10 @@ class NsqJob extends Job implements JobContract
         parent::delete();
         // sending to client set success
         $this->getCurrentClient()->send(Packet::fin($this->getJobId()));
+        Log::info("Process job success, send fin to nsq server.");
         // receive form client
         $this->getCurrentClient()->send(Packet::rdy(Config::get('nsq.options.rdy', 1)));
+        Log::info("Ready to receive next message.");
     }
 
 
