@@ -197,6 +197,25 @@ class NsqQueue extends Queue implements QueueContract
     }
 
     /**
+     * refresh nsq client form nsqlookupd result
+     */
+    public function reRefreshClient()
+    {
+        foreach ($this->pool->getConsumerPool() as $key => $client) {
+            $client->close();
+        }
+        $queueManager = app('queue');
+        $reflect = new \ReflectionObject($queueManager);
+        $property = $reflect->getProperty('connections');
+        $property->setAccessible(true);
+        //remove nsq
+        $connections = $property->getValue($queueManager);
+        unset($connections['nsq']);
+        $property->setValue($queueManager, $connections);
+        Log::info("re-refresh nsq client success.");
+    }
+
+    /**
      * pub to nsqd
      * @param $job
      * @param $data
