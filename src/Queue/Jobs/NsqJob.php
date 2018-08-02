@@ -91,12 +91,27 @@ class NsqJob extends Job implements JobContract
     public function delete()
     {
         parent::delete();
-        // sending to client set success
-        $this->getCurrentClient()->send(Packet::fin($this->getJobId()));
-        Log::info("Process job success, send fin to nsq server.");
-        // receive form client
-        $this->getCurrentClient()->send(Packet::rdy(Config::get('nsq.options.rdy', 1)));
-        Log::info("Ready to receive next message.");
+
+        if (!$this->getCurrentClient()->isConnected()) {
+            foreach ($this->getQueue()->getClientPool()->getConsumerPool() as $key => $client) {
+                $client->close();
+            }
+            $queueManager = app('queue');
+            $reflect = new \ReflectionObject($queueManager);
+            $property = $reflect->getProperty('connections');
+            $property->setAccessible(true);
+            //remove nsq
+            $connections = $property->getValue($queueManager);
+            unset($connections['nsq']);
+            $property->setValue($queueManager, $connections);
+            Log::info("nsq client has gone away, reconnect nsq client.");
+        } else {
+            // sending to client set success
+            $this->getCurrentClient()->send(Packet::fin($this->getJobId()));
+            // receive form client
+            $this->getCurrentClient()->send(Packet::rdy(Config::get('nsq.options.rdy', 1)));
+        }
+
     }
 
 
